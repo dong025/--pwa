@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2f6fed">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>清晨体重记录</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#f4f5f7;color:#1c1f23;
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  padding:14px 14px 40px;max-width:520px;margin:0 auto}
+h1{font-size:17px;margin:6px 0 14px;font-weight:600}
+.card{background:#fff;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 1px 2px rgba(16,24,40,.06)}
+.lbl{color:#8b9098;font-size:12px}
+.big{font-size:30px;font-weight:700;letter-spacing:-.5px}
+.row{display:flex;align-items:center;gap:8px}
+.spread{display:flex;justify-content:space-between;align-items:center}
+input,button{font:inherit}
+.inp{flex:1;border:1px solid #e3e6ea;border-radius:10px;padding:11px 12px;outline:none;background:#fafbfc;width:100%}
+.inp:focus{border-color:#2f6fed;background:#fff}
+.btn{border:0;background:#2f6fed;color:#fff;border-radius:10px;padding:11px 18px;font-weight:600;cursor:pointer}
+.btn:active{opacity:.85}
+.btn.ghost{background:#eef2fb;color:#2f6fed;padding:10px 12px;font-weight:500;font-size:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#eef0f3;border-radius:12px;overflow:hidden}
+.cell{background:#fff;padding:12px}
+.cell .v{font-size:19px;font-weight:600;margin-top:2px}
+canvas{display:block;width:100%}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f0f2f5}
+li:last-child{border-bottom:0}
+.del{color:#c8ccd2;border:0;background:none;font-size:19px;padding:0 2px;cursor:pointer;line-height:1}
+.del:hover{color:#e5484d}
+.up{color:#e5484d}.down{color:#12a150}
+.sub{color:#8b9098;font-size:12px;font-weight:400}
+.tools{display:flex;gap:8px;flex-wrap:wrap}
+.tools .btn{flex:1;min-width:104px}
+</style>
+</head>
+<body>
+
+<h1>🌅 清晨体重记录</h1>
+
+<div class="card">
+  <div class="spread" style="margin-bottom:10px">
+    <span class="lbl" id="todayLbl">--</span>
+    <span class="lbl">空腹 · 排空 · 同一时间</span>
+  </div>
+  <div class="row">
+    <input id="wInput" class="inp" type="number" step="0.1" inputmode="decimal" placeholder="今晨体重">
+    <span class="lbl">kg</span>
+    <button class="btn" id="saveBtn">记录</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="spread" style="margin-bottom:6px">
+    <span class="lbl">最近体重</span>
+    <span class="lbl" id="goalLbl"></span>
+  </div>
+  <div class="big" id="latest">--</div>
+  <div class="grid" style="margin-top:12px">
+    <div class="cell"><div class="lbl">较上次</div><div class="v" id="diff">--</div></div>
+    <div class="cell"><div class="lbl">近7次平均</div><div class="v" id="avg7">--</div></div>
+    <div class="cell"><div class="lbl">BMI</div><div class="v" id="bmi">--</div></div>
+    <div class="cell"><div class="lbl">累计变化</div><div class="v" id="total">--</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="spread" style="margin-bottom:8px">
+    <span class="lbl">趋势（最近30条）</span>
+    <span class="lbl" id="rangeLbl"></span>
+  </div>
+  <canvas id="chart"></canvas>
+</div>
+
+<div class="card">
+  <div class="spread" style="margin-bottom:4px">
+    <span class="lbl">历史记录</span>
+    <span class="lbl" id="cnt"></span>
+  </div>
+  <ul id="list"></ul>
+</div>
+
+<div class="card">
+  <div class="lbl" style="margin-bottom:8px">设置</div>
+  <div class="row" style="gap:10px;align-items:flex-end">
+    <label style="flex:1"><span class="lbl">身高 cm</span><input id="hInput" class="inp" type="number" style="margin-top:4px"></label>
+    <label style="flex:1"><span class="lbl">目标 kg</span><input id="tInput" class="inp" type="number" step="0.1" style="margin-top:4px"></label>
+  </div>
+</div>
+
+<div class="card">
+  <div class="tools">
+    <button class="btn ghost" id="expBtn">导出 CSV</button>
+    <button class="btn ghost" id="bakBtn">备份 JSON</button>
+    <button class="btn ghost" id="impBtn">恢复备份</button>
+    <button class="btn ghost" id="clrBtn" style="color:#e5484d;background:#fdeeee">清空数据</button>
+  </div>
+  <input type="file" id="fileInput" accept=".json,application/json" hidden>
+</div>
+
+<script>
+const RK='wt_records_v1', CK='wt_cfg_v1', WD=['周日','周一','周二','周三','周四','周五','周六'];
+const $=id=>document.getElementById(id);
+const pad=n=>String(n).padStart(2,'0');
+const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())};
+const wdOf=ds=>{const p=ds.split('-').map(Number);return WD[new Date(p[0],p[1]-1,p[2]).getDay()]};
+const signed=n=>(n>0?'+':'')+n.toFixed(1);
+const clsOf=n=>n>0?'up':(n<0?'down':'');
+const bmiTag=b=>b<18.5?'偏瘦':b<24?'正常':b<28?'偏胖':'肥胖';
+
+let recs=[], cfg={height:170,target:60};
+
+function load(){
+  try{const r=JSON.parse(localStorage.getItem(RK));recs=Array.isArray(r)?r:[]}catch(e){recs=[]}
+  try{cfg=Object.assign(cfg,JSON.parse(localStorage.getItem(CK))||{})}catch(e){}
+  recs.sort((a,b)=>a.date<b.date?-1:1);
+}
+const persist=()=>localStorage.setItem(RK,JSON.stringify(recs));
+const persistCfg=()=>localStorage.setItem(CK,JSON.stringify(cfg));
+
+function render(){
+  const t=todayStr(), d=new Date();
+  $('todayLbl').textContent=t+' '+WD[d.getDay()];
+  const tr=recs.find(r=>r.date===t);
+  $('wInput').value=tr?tr.weight:'';
+
+  const last=recs[recs.length-1];
+  if(!last){
+    $('latest').innerHTML='-- <span class="sub">还没有记录</span>';
+    ['diff','avg7','bmi','total'].forEach(id=>$(id).textContent='--');
+    $('goalLbl').textContent='';
+  }else{
+    $('latest').innerHTML=last.weight.toFixed(1)+' <span class="sub">kg</span> <span class="sub">'+last.date+'</span>';
+    const prev=recs[recs.length-2];
+    $('diff').innerHTML=prev?'<span class="'+clsOf(last.weight-prev.weight)+'">'+signed(last.weight-prev.weight)+'</span>':'--';
+    const s=recs.slice(-7), avg=s.reduce((a,b)=>a+b.weight,0)/s.length;
+    $('avg7').textContent=avg.toFixed(2);
+    const h=Number(cfg.height);
+    $('bmi').innerHTML=h>0?(last.weight/Math.pow(h/100,2)).toFixed(1)+' <span class="sub">'+bmiTag(last.weight/Math.pow(h/100,2))+'</span>':'--';
+    const tv=last.weight-recs[0].weight;
+    $('total').innerHTML='<span class="'+clsOf(tv)+'">'+signed(tv)+'</span>';
+    const tg=Number(cfg.target);
+    $('goalLbl').textContent=tg>0?(last.weight>tg?'距目标还差 '+(last.weight-tg).toFixed(1)+' kg':'已达标 🎉'):'';
+  }
+
+  const ul=$('list'); ul.innerHTML='';
+  const arr=recs.slice().reverse();
+  $('cnt').textContent=arr.length?'共 '+arr.length+' 条':'';
+  if(!arr.length) ul.innerHTML='<li><span class="sub">还没有记录，填一个体重开始吧</span></li>';
+  arr.slice(0,80).forEach(r=>{
+    const i=recs.findIndex(x=>x.date===r.date), p=recs[i-1];
+    const dv=p?r.weight-p.weight:null;
+    const li=document.createElement('li');
+    li.innerHTML='<span>'+r.date+' <span class="sub">'+wdOf(r.date)+'</span></span>'+
+      '<span style="display:flex;align-items:center;gap:14px">'+
+      '<b>'+r.weight.toFixed(1)+'<span class="sub"> kg</span></b>'+
+      '<span class="sub '+(dv!==null?clsOf(dv):'')+'" style="width:48px;text-align:right">'+(dv!==null?signed(dv):'')+'</span>'+
+      '<button class="del" data-date="'+r.date+'" title="删除">×</button></span>';
+    ul.appendChild(li);
+  });
+
+  drawChart();
+}
+
+function drawChart(){
+  const cvs=$('chart'), data=recs.slice(-30);
+  const W=Math.max(240,cvs.parentElement.clientWidth-28), H=180;
+  const dpr=window.devicePixelRatio||1;
+  cvs.width=W*dpr; cvs.height=H*dpr; cvs.style.width=W+'px'; cvs.style.height=H+'px';
+  const ctx=cvs.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+
+  if(!data.length){
+    ctx.fillStyle='#b9bec6'; ctx.font='13px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('还没有数据，从今天开始吧～',W/2,H/2);
+    $('rangeLbl').textContent=''; return;
+  }
+  const padL=36,padR=14,padT=18,padB=24, cw=W-padL-padR, ch=H-padT-padB;
+  const vals=data.map(d=>d.weight);
+  let mn=Math.min.apply(null,vals), mx=Math.max.apply(null,vals);
+  if(mx-mn<1){const m=(mx+mn)/2; mn=m-0.5; mx=m+0.5;}
+  const pd=(mx-mn)*0.2; mn-=pd; mx+=pd;
+  const X=i=>padL+(data.length===1?cw/2:cw*i/(data.length-1));
+  const Y=v=>padT+ch*(1-(v-mn)/(mx-mn));
+
+  ctx.font='11px -apple-system,sans-serif'; ctx.textAlign='right'; ctx.textBaseline='middle';
+  for(let i=0;i<=4;i++){
+    const v=mn+(mx-mn)*i/4, y=Y(v);
+    ctx.strokeStyle='#f0f2f5'; ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillStyle='#a8adb5'; ctx.fillText(v.toFixed(1),padL-6,y);
+  }
+  const tg=Number(cfg.target);
+  if(tg>0&&tg>=mn&&tg<=mx){
+    const y=Y(tg);
+    ctx.save(); ctx.setLineDash([4,4]); ctx.strokeStyle='#12a150';
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.restore();
+    ctx.fillStyle='#12a150'; ctx.textAlign='left'; ctx.fillText('目标',padL+2,y-8);
+  }
+  ctx.beginPath();
+  data.forEach((d,i)=>{ i?ctx.lineTo(X(i),Y(d.weight)):ctx.moveTo(X(i),Y(d.weight)); });
+  if(data.length>1){
+    ctx.save();
+    ctx.lineTo(X(data.length-1),padT+ch); ctx.lineTo(X(0),padT+ch); ctx.closePath();
+    const g=ctx.createLinearGradient(0,padT,0,padT+ch);
+    g.addColorStop(0,'rgba(47,111,237,.18)'); g.addColorStop(1,'rgba(47,111,237,0)');
+    ctx.fillStyle=g; ctx.fill(); ctx.restore();
+    ctx.beginPath();
+    data.forEach((d,i)=>{ i?ctx.lineTo(X(i),Y(d.weight)):ctx.moveTo(X(i),Y(d.weight)); });
+  }
+  ctx.strokeStyle='#2f6fed'; ctx.lineWidth=2; ctx.lineJoin='round'; ctx.stroke();
+
+  data.forEach((d,i)=>{
+    ctx.beginPath(); ctx.arc(X(i),Y(d.weight),i===data.length-1?4:2.5,0,7);
+    ctx.fillStyle='#fff'; ctx.fill(); ctx.strokeStyle='#2f6fed'; ctx.lineWidth=2; ctx.stroke();
+  });
+  const li=data.length-1;
+  ctx.fillStyle='#2f6fed'; ctx.font='bold 12px -apple-system,sans-serif';
+  ctx.textAlign='right'; ctx.textBaseline='bottom';
+  ctx.fillText(data[li].weight.toFixed(1),X(li)+2,Y(data[li].weight)-8);
+
+  ctx.fillStyle='#a8adb5'; ctx.font='11px -apple-system,sans-serif'; ctx.textBaseline='top';
+  const idxs=data.length<=2?[0,data.length-1]:[0,Math.floor((data.length-1)/2),data.length-1];
+  [...new Set(idxs)].forEach(i=>{
+    let xx,al;
+    if(i===0){xx=padL;al='left'} else if(i===data.length-1){xx=W-padR;al='right'} else {xx=X(i);al='center'}
+    ctx.textAlign=al; ctx.fillText(data[i].date.slice(5),xx,padT+ch+7);
+  });
+  $('rangeLbl').textContent=data[0].date.slice(5)+' ~ '+data[data.length-1].date.slice(5);
+}
+
+/* ---------- 交互 ---------- */
+$('saveBtn').onclick=()=>{
+  const v=parseFloat($('wInput').value);
+  if(!(v>=20&&v<=300)){alert('请输入 20~300 之间的体重');return;}
+  const t=todayStr(), i=recs.findIndex(r=>r.date===t);
+  if(i>=0) recs[i].weight=v; else recs.push({date:t,weight:v});
+  recs.sort((a,b)=>a.date<b.date?-1:1);
+  persist(); render(); $('wInput').blur();
+};
+$('wInput').addEventListener('keydown',e=>{ if(e.key==='Enter') $('saveBtn').click(); });
+
+$('list').addEventListener('click',e=>{
+  const b=e.target.closest('.del'); if(!b) return;
+  const ds=b.dataset.date;
+  if(confirm('删除 '+ds+' 的记录？')){ recs=recs.filter(r=>r.date!==ds); persist(); render(); }
+});
+
+$('hInput').oninput=()=>{ cfg.height=parseFloat($('hInput').value)||0; persistCfg(); render(); };
+$('tInput').oninput=()=>{ cfg.target=parseFloat($('tInput').value)||0; persistCfg(); render(); };
+
+function dl(blob,name){
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+}
+$('expBtn').onclick=()=>{
+  if(!recs.length) return alert('暂无数据');
+  const h=Number(cfg.height), rows=[['日期','体重(kg)','较前次(kg)','BMI']];
+  recs.forEach((r,i)=>{
+    rows.push([r.date, r.weight.toFixed(1),
+      i?(r.weight-recs[i-1].weight).toFixed(1):'',
+      h?(r.weight/Math.pow(h/100,2)).toFixed(1):'']);
+  });
+  dl(new Blob(['\ufeff'+rows.map(r=>r.join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}),
+     '体重记录_'+todayStr()+'.csv');
+};
+$('bakBtn').onclick=()=>{
+  dl(new Blob([JSON.stringify({recs,cfg},null,2)],{type:'application/json'}),
+     '体重备份_'+todayStr()+'.json');
+};
+$('impBtn').onclick=()=>$('fileInput').click();
+$('fileInput').onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const o=JSON.parse(rd.result);
+      if(Array.isArray(o.recs)) recs=o.recs;
+      if(o.cfg) cfg=Object.assign(cfg,o.cfg);
+      recs.sort((a,b)=>a.date<b.date?-1:1);
+      persist(); persistCfg();
+      $('hInput').value=cfg.height||''; $('tInput').value=cfg.target||'';
+      render(); alert('恢复成功，共 '+recs.length+' 条记录');
+    }catch(err){ alert('文件格式不正确'); }
+  };
+  rd.readAsText(f); e.target.value='';
+};
+$('clrBtn').onclick=()=>{
+  if(!recs.length) return alert('暂无数据');
+  if(confirm('确定清空全部记录？此操作不可恢复')){ recs=[]; persist(); render(); }
+};
+
+window.addEventListener('resize',drawChart);
+load();
+$('hInput').value=cfg.height||''; $('tInput').value=cfg.target||'';
+render();
+
+// 注册 service worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js')
+      .then(reg => console.log('SW registered'))
+      .catch(err => console.log('SW registration failed', err));
+  });
+}
+</script>
+</body>
+</html>
